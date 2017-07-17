@@ -1,5 +1,3 @@
-#include <Arduino.h>
-
 /*
 #*********************************************************************
 #Copyright 2016 Maya Culpa, LLC
@@ -18,12 +16,12 @@
 #along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #*********************************************************************
 
-HAPI Remote Terminal Unit Firmware Code V3.1.1
+HAPI Remote Terminal Unit Firmware Code V3.1.2
 Authors: Tyler Reed, Mark Miller
 ESP Modification: John Archbold
 
-Sketch Date: June 29th, 2017
-Sketch Version: V3.1.1
+Sketch Date: July 21th, 2017
+Sketch Version: V3.1.2
 Implement of MQTT-based HAPInode (HN) for use in Monitoring and Control
 Implements mDNS discovery of MQTT broker
 Implements definitions for
@@ -47,7 +45,7 @@ boolean sendMQTTStatus(void){
   // Set the time
   currentTime = now();
   // Identify HAPInode
-  status_message["Node"] = HN_Id;
+  status_message["module"] = HN_Id;
   // Returns the current status of the HN itself
   // Includes firmware version, MAC address, IP Address, Free RAM and Idle Mode
   status_message["FW"] = HAPI_FW_VERSION;
@@ -57,7 +55,8 @@ boolean sendMQTTStatus(void){
   status_message["Free SRAM"] = String(freeRam()) + "k";
   status_message["Idle"] = idle_mode;
 
-  status_message.printTo(MQTTOutput, 128);          // MQTT JSON string is max 96 bytes
+//jma  status_message.printTo(MQTTOutput, 128);          // MQTT JSON string is max 96 bytes
+  status_message.printTo(MQTTOutput, 512);
   strcpy(mqtt_topic, mqtt_topic_status);            // Generic status response topic
   strcat(mqtt_topic, hostString);                   // Add the NodeId
 
@@ -129,13 +128,48 @@ boolean sendAllMQTTAssets(void) {
 
 boolean sendMQTTAsset(int AssetIdx, int Number) {
   FuncDef f = HapisFunctions[Number];               // Pointer to current sensor
-  createAssetJSON(AssetIdx, Number);                // (Store result in MQTTOutput)
+  CFuncDef c = HapicFunctions[Number];
+  ControlData d = HapicData[Number];
+  char NumberString[7];
+  
+  itoa(Number, NumberString, 10);                   // convert Number to ASCII value for assetID
   strcpy(mqtt_topic, mqtt_topic_asset);             // Generic asset response topic
   strcat(mqtt_topic, hostString);                   // Add the NodeId
-  strcat(mqtt_topic,"/");                           // /
-  strcat(mqtt_topic,f.fName);                       // sensor name
-  publishJSON(mqtt_topic);                          // Publish it
+  strcat(mqtt_topic,"/");                           // 
+  strcat(mqtt_topic,f.fContext);                    // Context
+  strcat(mqtt_topic,"/");                           // 
+  strcat(mqtt_topic,f.fType);                       // Type
+  strcat(mqtt_topic,"/");                           // 
+  switch (AssetIdx) {
+    case SENSORID_DIO:                              // AssetId (/Name)
+      strcat(mqtt_topic, "DIO");
+      strcat(mqtt_topic, NumberString);
+      break;
+    case SENSORID_AIO:
+      strcat(mqtt_topic, "AIO");
+      strcat(mqtt_topic, NumberString);
+      break;
+    case SENSORID_FN:
+      strcat(mqtt_topic, (char*) f.fAsset);
+      break;
+    case CONTROLID_FN:
+      strcat(mqtt_topic, (char*) c.fAsset);
+      break;
+/*
+    case CONTROLDATA1_FN:
+      strcat(mqtt_topic,(String)d.hc_name;
+      break;
 
+    case CONTROLDATA2_FN:
+      strcat(mqtt_topic,(String)d.hc_name;
+      break;
+*/
+    default:
+      break;    
+  }
+  
+  createAssetJSON(AssetIdx, Number);                // (Store result in MQTTOutput)
+  publishJSON(mqtt_topic);                          // Publish it
   Serial.print(mqtt_topic);
   Serial.print(F(" : "));
   Serial.println(MQTTOutput);
@@ -153,48 +187,80 @@ boolean createAssetJSON(int AssetIdx, int Number) {
   ControlData d = HapicData[Number];
   int pinValue;
   float funcVal = -9.99;
-  StaticJsonBuffer<256> hn_asset;                   // Asset data for this HN
+  StaticJsonBuffer<512> hn_asset;                   // Asset data for this HN
   JsonObject& asset_message = hn_asset.createObject();
 
+
 // Set the NodeId
-  asset_message["Node"] = HN_Id;
+//  asset_message["module"] = HN_Id;
 
   // Assembles a message with values from pins and custom functions
   // Returns a JSON string
   currentTime = now();                            // Get the current time
-  asset_message["t"] = currentTime;               //  into the JSON message
+  asset_message["time"] = currentTime;               //  into the JSON message
 
   switch(AssetIdx) {
     case SENSORID_DIO:
-      asset_message["Asset"] = F("DIO");            // Asset ID
-      asset_message["ctxt"] = F("PIN");             // Context
-      asset_message["unit"] = F("");                // Units of measurement
       pinValue = digitalRead(Number);
-      asset_message["data"] = pinValue;           // Data
+      asset_message["value"] = (float) pinValue;    // Data
+//      asset_message["name"] = F("PIN");             // Asset ID
+//      asset_message["context"] = F("Env");  // Context
+//      asset_message["virtual"] = 0;                 // virtual (1) or real (0)
+//      asset_message["type"] = F("dv");              // Asset ID (digital value)
+//      asset_message["enabled"] = 1;                 // enabled (1) or disabled (0)
+//      asset_message["id"] = HN_Id + '-' + "DIO" + String(Number);  // asset id
+      asset_message["unit"] = F("");                // Units of measurement
+//      asset_message["system"] = F("");              //
+//      asset_message["module"] = HN_Id + '-' + "DIO" + String(Number);
       break;
+
     case SENSORID_AIO:
-      asset_message["Asset"] = F("AIO");
-      asset_message["ctxt"] = F("PIN");
-      asset_message["unit"] = F("");
-      pinValue = analogRead(Number);
-      asset_message["data"] = pinValue;
+      pinValue = analogRead(Number);                // Select the analog input
+      delay(50);                                    // Wait til it stablizes
+      for (int i = 0; i < 10; i++) {                // Re-read values 
+        pinValue = analogRead(Number);              //  to allow the measurement capacitor to stabilize
+        delay(20);
+      }
+      asset_message["value"] = (float) pinValue;    // Data
+//      asset_message["name"] = F("PIN");             // Asset ID
+//      asset_message["context"] = (String)f.fContext;  // Context
+//      asset_message["virtual"] = 0;                 // virtual (1) or real (0)
+//      asset_message["type"] = F("av");              // Asset ID (analog value)
+//      asset_message["enabled"] = 1;                 // enabled (1) or disabled (0)
+//      asset_message["id"] = HN_Id + '-' + "AIO" + String(Number);  // asset id
+      asset_message["unit"] = F("mV");              // Units of measurement
+//      asset_message["system"] = F("");              //
+//      asset_message["module"] = HN_Id + '-' + "AIO" + String(Number);
       break;
+
     case SENSORID_FN:
-      f = HapisFunctions[Number];
-      asset_message["Asset"] =  (String)f.fName;
-      asset_message["ctxt"] =  (String)f.fType;
-      asset_message["unit"] =  (String)f.fUnit;
       funcVal = f.fPtr(Number);
-      asset_message["data"] =  funcVal;     // Two decimal points
+      asset_message["value"] = (float) funcVal;             // Data
+//      asset_message["name"] = (String)f.fName;      // Name of asset
+//      asset_message["context"] = (String)f.fContext;  // Context
+//      asset_message["virtual"] = 0;                 // virtual (1) or real (0)
+//      asset_message["type"] = (String)f.fType;      // Type of asset
+//      asset_message["enabled"] = 1;                 // enabled (1) or disabled (0)
+//      asset_message["id"] = HN_Id + '-' + (String)f.fAsset;       // asset id
+      asset_message["unit"] = (String)f.fUnit;      // Units of measurement
+//      asset_message["system"] = F("");              //
+//      asset_message["module"] = HN_Id + '-' + (String)f.fAsset;
       break;
+
     case CONTROLID_FN:
-      c = HapicFunctions[Number];
-      asset_message["Asset"] =  (String)c.fName;
-      asset_message["ctxt"] =  (String)c.fType;
-      asset_message["unit"] =  (String)c.fUnit;
       funcVal = c.iPtr(Number);
-      asset_message["data"] =  funcVal;     // Two decimal points
+      asset_message["value"] = (float) funcVal;     // Data
+//      asset_message["name"] = (String)c.fName;      // Name of asset
+//      asset_message["context"] = (String)c.fContext;  // Context
+//      asset_message["virtual"] = 0;                 // virtual (1) or real (0)
+//      asset_message["type"] = (String)c.fType;      // Type of asset
+//      asset_message["enabled"] = 1;                 // enabled (1) or disabled (0)
+//      asset_message["id"] = HN_Id + '-' + (String)c.fAsset;       // asset id
+      asset_message["unit"] = (String)c.fUnit;      // Units of measurement
+//      asset_message["system"] = F("");              //
+//      asset_message["module"] = HN_Id + '-' + (String)c.fAsset;
       break;
+/*
     case CONTROLDATA1_FN:
       asset_message["Asset"] =  (String)d.hc_name;
       asset_message["pol"] =  (boolean)d.hc_polarity;
@@ -202,16 +268,18 @@ boolean createAssetJSON(int AssetIdx, int Number) {
       asset_message["end"] =  (unsigned long)d.hc_end;
       asset_message["rpt"] =  (unsigned long)d.hc_repeat;
       break;
+
     case CONTROLDATA2_FN:
       asset_message["Asset"] =  (String)d.hc_name;
       asset_message["von"] =  (float)d.hcs_onValue;
       asset_message["voff"] =  (float)d.hcs_offValue;
       break;
-
+*/
     default:
       break;
   }
-  asset_message.printTo(MQTTOutput, 128);          // MQTT JSON string is max 96 bytes
+
+  asset_message.printTo(MQTTOutput, 512);          // MQTT JSON string is max 96 bytes
   Serial.println(MQTTOutput);
 }
 
@@ -365,7 +433,7 @@ void MQTTcallback(char* topic, byte* payload, unsigned int length) {
           AssetIdx = SENSORID_FN;                    // Asset Function IO
           for (int i=0;i < ArrayLength(HapisFunctions);i++) {    // Scan for a match on the sensor name
             f = HapisFunctions[i];                    // Point to Asset read function structure
-            if (strcmp(command_topic["Asset"],f.fName) == 0) {  // Asset match?
+            if (strcmp(command_topic["Asset"],f.fAsset) == 0) {  // Asset match?
               Number = i;                             // Match for Sensor name
             }
           }
@@ -378,7 +446,7 @@ void MQTTcallback(char* topic, byte* payload, unsigned int length) {
             AssetIdx = CONTROLID_FN;                 // Control Function IO
             for (int i=0;i < ArrayLength(HapicFunctions);i++) { // Scan for a match on the control name
               c = HapicFunctions[i];                  // Point to control function structure
-              if (strcmp(command_topic["Asset"],c.fName) == 0) {  // Asset match?
+              if (strcmp(command_topic["Asset"],c.fAsset) == 0) {  // Asset match?
                 Number = i;                           // Match for control name
               }
             }
@@ -469,7 +537,7 @@ void MQTTcallback(char* topic, byte* payload, unsigned int length) {
         strcpy(hn_topic,mqtt_topic_array[ASSETSTART+1]);     // Set base topic for a specific asset query
         strcat(hn_topic,hostString);              // NodeId next
         strcat(hn_topic,"/");                     //  .. MQTT separator
-        strcat(hn_topic, f.fName);                //  .. and the sensor name
+        strcat(hn_topic, f.fAsset);                //  .. and the sensor name
         if (strcmp(topic, hn_topic) == 0) {         // Asset match?
           Number = i;                             // Match for Sensor name
         }
@@ -487,7 +555,7 @@ void MQTTcallback(char* topic, byte* payload, unsigned int length) {
         strcpy(hn_topic,mqtt_topic_array[1]);     // Set base topic for an asset query
         strcat(hn_topic,hostString);              // NodeId next
         strcat(hn_topic,"/");                     //  .. MQTT separator
-        strcat(hn_topic, c.fName);                //  .. and the control name
+        strcat(hn_topic, c.fAsset);                //  .. and the control name
         if (strcmp(topic, hn_topic) == 0) {         // Asset match?
           Number = i;                             // Match for Sensor name
         }
@@ -509,7 +577,7 @@ void MQTTcallback(char* topic, byte* payload, unsigned int length) {
         strcpy(hn_topic,mqtt_topic_array[CONFIGSTART]);       // Set base topic for a specific asset query
         strcat(hn_topic,hostString);              // NodeId next
         strcat(hn_topic,"/");                     //  .. MQTT separator
-        strcat(hn_topic, c.fName);                //  .. and the sensor name
+        strcat(hn_topic, c.fAsset);                //  .. and the sensor name
         if (strcmp(topic, hn_topic) == 0) {       // Asset match?
           Number = i;                             // Match for Sensor name
         }

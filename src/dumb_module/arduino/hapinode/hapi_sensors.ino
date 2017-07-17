@@ -1,5 +1,3 @@
-#include <Arduino.h>
-
 /*
 #*********************************************************************
 #Copyright 2016 Maya Culpa, LLC
@@ -18,12 +16,12 @@
 #along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #*********************************************************************
 
-HAPI Remote Terminal Unit Firmware Code V3.1.1
+HAPI Remote Terminal Unit Firmware Code V3.1.2
 Authors: Tyler Reed, Mark Miller
 ESP Modification: John Archbold
 
-Sketch Date: June 29th, 2017
-Sketch Version: V3.1.1
+Sketch Date: July 21th, 2017
+Sketch Version: V3.1.2
 Implement of MQTT-based HAPInode (HN) for use in Monitoring and Control
 Implements mDNS discovery of MQTT broker
 Implements definitions for
@@ -184,6 +182,9 @@ float readpH(int Device) {
   phValue = 3.5 * phValue;                  //convert the millivolt into pH value
 //  Serial.print(F("pH: "));
 //  Serial.println(phValue);
+
+//jma
+  phValue = 6.66;
   return phValue;
 }
 
@@ -221,6 +222,9 @@ float readTDS(int Device) {
   TDSValue = 1.0 * TDSValue;                  // Convert the millivolt into TDS value
 //  Serial.print(F("TDS: "));
 //  Serial.println(TDSValue);
+
+//jma
+  TDSValue = 333.3;
   return TDSValue;
 }
 
@@ -241,6 +245,8 @@ float readLightSensor(int Device) {
   int RawADC = analogRead(d.hcs_sensepin);
 //TODO
   Lux = (float)RawADC; // Need to do some processing to get lux from CDS reading
+  //jma
+  Lux = 99.9;
   return Lux;
 }
 
@@ -250,12 +256,17 @@ float readFlow(int Device) {
   ControlData d;
   d = HapicData[Device];
 //TODO
-  return (float)WaterFlowRate;
+//jma
+  WaterFlowRate = 44.40;
+  return WaterFlowRate;
 }
 
 float readSensorPin(int Device) {
   float pinData;
 //TODO
+
+//jma
+  pinData = 88.88;
   return pinData;
 }
 

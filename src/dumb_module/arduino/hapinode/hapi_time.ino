@@ -1,5 +1,3 @@
-#include <Arduino.h>
-
 void setupTime()  {
   setSyncInterval(60);        // Set minimum seconds between re-sync via now() call
   setSyncProvider(RTC.get);   // Get the time from the RTC during operation

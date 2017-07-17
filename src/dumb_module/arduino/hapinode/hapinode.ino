@@ -1,5 +1,3 @@
-#include <Arduino.h>
-
 /*
 #*********************************************************************
 #Copyright 2016 Maya Culpa, LLC
@@ -18,12 +16,12 @@
 #along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #*********************************************************************
 
-HAPI Remote Terminal Unit Firmware Code V3.1.1
+HAPI Remote Terminal Unit Firmware Code V3.1.2
 Authors: Tyler Reed, Mark Miller
 ESP Modification: John Archbold
 
-Sketch Date: June 29th, 2017
-Sketch Version: V3.1.1
+Sketch Date: July 21th, 2017
+Sketch Version: V3.1.2
 Implement of MQTT-based HAPInode (HN) for use in Monitoring and Control
 Implements mDNS discovery of MQTT broker
 Implements definitions for
@@ -116,7 +114,7 @@ unsigned long mscount;      // millisecond counter
 time_t epoch;               // UTC seconds
 time_t currentTime;         // Local value
 
-String HAPI_FW_VERSION = F("V3.1.1");    // The version of the firmware the HN is running
+String HAPI_FW_VERSION = F("V3.1.2");    // The version of the firmware the HN is running
 #ifdef HN_ENET
 String HN_base = F("HN2");             // Prefix for mac address
 #endif
@@ -215,9 +213,10 @@ const char* mqtt_listen_array[MAXLISTEN] = {
   "CONFIG/QUERY/#"
 };
 
-StaticJsonBuffer<128> hn_topic_exception;               // Exception data for this HN
-char MQTTOutput[256];                                   // String storage for the JSON data
-char MQTTInput[256];                                    // String storage for the JSON data
+//jma StaticJsonBuffer<128> hn_topic_exception;               // Exception data for this HN
+StaticJsonBuffer<512> hn_topic_exception;               // Exception data for this HN
+char MQTTOutput[512];                                   // String storage for the JSON data
+char MQTTInput[512];                                    // String storage for the JSON data
 
 // Callback function header
 void MQTTcallback(char* topic, byte* payload, unsigned int length);
@@ -261,8 +260,10 @@ DHT dhts[1] = {dht1};             //add the DHT device to the array of DHTs
 //used when setting or a reading a pin isn't enough, as in the instance of library calls.
 typedef float (* GenericFP)(int); //generic pointer to a function that takes an int and returns a float
 struct FuncDef {   //define a structure to associate a Name to generic function pointer.
-  const char* fName;
   const char* fType;
+  const char* fAsset;
+//  const char* fName;
+  const char* fContext;
   const char* fUnit;
   int fPin;
   GenericFP fPtr;
@@ -270,14 +271,15 @@ struct FuncDef {   //define a structure to associate a Name to generic function 
 
 #define ArrayLength(x) (sizeof(x)/sizeof(*(x)))
 // Create a FuncDef for each custom function
-// Format: abbreviation, context, pin, data function
-FuncDef sfunc1 = {"tmp", "Env", "C", -1, &readTemperatured};
-FuncDef sfunc2 = {"hum", "Env", "%", -1, &readHumidity};
-FuncDef sfunc3 = {"lux", "Env", "lux", sLux_PIN, &readLightSensor};
-FuncDef sfunc4 = {"tmw", "Water", "C", WIRE_PIN , &read1WireTemperature};
-FuncDef sfunc5 = {"phv", "Water", "pH", spH_PIN, &readpH};
-FuncDef sfunc6 = {"tds", "Water", "ppm", sTDS_PIN, &readTDS};
-FuncDef sfunc7 = {"flo", "Water", "lpm", sWtrFlow_PIN, &readFlow};
+// Format: type, assetid, name, context, pin, data function
+FuncDef sfunc1 = {"ht", "AirTemp1", "Environment", "C", -1, &readTemperatured};
+FuncDef sfunc2 = {"ht", "AirHumidity1", "Environment", "%", -1, &readHumidity};
+FuncDef sfunc3 = {"lx", "LightSensor1", "Environment", "lux", sLux_PIN, &readLightSensor};
+FuncDef sfunc4 = {"wt", "WaterTemp1", "Water", "C", WIRE_PIN , &read1WireTemperature};
+FuncDef sfunc5 = {"ph", "pHSensor1", "Water", "pH", spH_PIN, &readpH};
+FuncDef sfunc6 = {"td", "TDSSensor1", "Water", "ppm", sTDS_PIN, &readTDS};
+//jma FuncDef sfunc7 = {"fl", "fl1", "Flow", "Wtr", "lpm", sWtrFlow_PIN, &readFlow};
+FuncDef sfunc7 = {"fl", "WaterFlow1", "Water", "lpm", sWtrFlow_PIN, &readFlow};
 FuncDef HapisFunctions[] = {sfunc1, sfunc2, sfunc3, sfunc4, sfunc5, sfunc6, sfunc7};
 
 // Custom control devices
@@ -285,8 +287,10 @@ FuncDef HapisFunctions[] = {sfunc1, sfunc2, sfunc3, sfunc4, sfunc5, sfunc6, sfun
 //used when setting or a reading a pin isn't enough, as in the instance of library calls.
 typedef float (* GenericFP)(int); //generic pointer to a function that takes an int and returns a float
 struct CFuncDef {   //define a structure to associate a Name to generic control pointer.
-  const char* fName;
   const char* fType;
+  const char* fAsset; // name
+//  const char* fName;
+  const char* fContext;
   const char* fUnit;
   int fPin;
   GenericFP oPtr;
@@ -294,13 +298,13 @@ struct CFuncDef {   //define a structure to associate a Name to generic control 
 };
 
 // Create a FuncDef for each custom control function
-// Format: abbreviation, context, Control data index, control function, data function
-CFuncDef cfunc1 = {"ppw", "Pump", "lpm", 1, &controlPumps, &readSensorPin};
-CFuncDef cfunc2 = {"ppf", "Pump", "lpm", 2, &controlPumps, &readSensorPin};
-CFuncDef cfunc3 = {"ppn", "Pump", "lpm", 3, &controlPumps, &readTDS};
-CFuncDef cfunc4 = {"pHU", "Pump", "lpm", 4, &controlPumps, &readpH};
-CFuncDef cfunc5 = {"pHD", "Pump", "lpm", 5, &controlPumps, &readpH};
-CFuncDef cfunc6 = {"lmp", "Lamp", "lpm", 6, &controlLamps, &readLightSensor};
+// Format: type, assetid/name, context, Control data index, control function, sense function
+CFuncDef cfunc1 = {"rl", "WaterPump1", "Water", "", 1, &controlPumps, &readSensorPin};
+CFuncDef cfunc2 = {"rl", "WaterPump2", "Water", "", 2, &controlPumps, &readSensorPin};
+CFuncDef cfunc3 = {"rl", "TDSPump1", "Water", "ppm", 3, &controlPumps, &readTDS};
+CFuncDef cfunc4 = {"rl", "pHPump1", "Water", "pH", 4, &controlPumps, &readpH};
+CFuncDef cfunc5 = {"rl", "pHPump2", "Water", "pH", 5, &controlPumps, &readpH};
+CFuncDef cfunc6 = {"rl", "LightSwitch1", "Environment", "lumens", 6, &controlLamps, &readLightSensor};
 CFuncDef HapicFunctions[] = {cfunc1, cfunc2, cfunc3, cfunc4, cfunc5, cfunc6};
 
 struct ControlData {
@@ -367,16 +371,20 @@ void setup() {
 // Start Debug port and sensors
 // ============================
   setupSensors();             // Initialize I/O and start devices
-  inputString.reserve(200);   // reserve 200 bytes for the inputString
+  inputString.reserve(512);   // reserve 512 bytes for the inputString
 
 #ifdef HN_WiFi
-  Serial.println(F("Initializing WiFi network...."));
+  Serial.print(F("Initializing WiFi network ... "));
+  Serial.print(ssid);
+  Serial.print(F(" - "));
+  Serial.println(password);
   WiFiStatus = WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(F("."));
   }
   WiFi.macAddress(mac);
+
 #endif // HN_WiFi
 
   b2c(&mac[3], &mac_str[0], 3);         //convert mac to ASCII value for unique station ID
@@ -419,28 +427,31 @@ void setup() {
   Serial.println(F(" mDNS responder started for this HAPInode"));
 
   Serial.print(F("Sending mDNS query to find mqtt broker - "));
-  int n = MDNS.queryService("mqtt", "tcp"); // Send out query for workstation tcp services
-  Serial.println(F("mDNS query done"));
-  if (n == 0) {
-    Serial.println(F("no services found"));
-  }
-  else {
-    Serial.print(n);
-    Serial.println(F(" service(s) found"));
-    for (int i = 0; i < n; ++i) {
-      // Print details for each service found
-      Serial.print(i + 1);
-      Serial.print(F(": "));
-      Serial.print(MDNS.hostname(i));
-      Serial.print(F(" ("));
-      Serial.print(MDNS.IP(i));
-      Serial.print(F(":"));
-      Serial.print(MDNS.port(i));
-      Serial.println(F(")"));
-      if (MDNS.port(i) == MQTT_port) {
-        MDNS.hostname(i).toCharArray(MQTT_broker_hostname,(MDNS.hostname(i).length()+1));
-// TODO check for separate ntp server
-        MDNS.hostname(i).toCharArray(ntpServer_hostname,(MDNS.hostname(i).length()+1));
+  int n = 0;
+  while (n == 0) {
+    n = MDNS.queryService("mqtt", "tcp"); // Send out query for workstation tcp services
+    Serial.println(F("mDNS query done"));
+    if (n == 0) {
+      Serial.println(F("no services found"));
+    }
+    else {
+      Serial.print(n);
+      Serial.println(F(" service(s) found"));
+      for (int i = 0; i < n; ++i) {
+        // Print details for each service found
+        Serial.print(i + 1);
+        Serial.print(F(": "));
+        Serial.print(MDNS.hostname(i));
+        Serial.print(F(" ("));
+        Serial.print(MDNS.IP(i));
+        Serial.print(F(":"));
+        Serial.print(MDNS.port(i));
+        Serial.println(F(")"));
+        if (MDNS.port(i) == MQTT_port) {
+          MDNS.hostname(i).toCharArray(MQTT_broker_hostname,(MDNS.hostname(i).length()+1));
+  // TODO check for separate ntp server
+          MDNS.hostname(i).toCharArray(ntpServer_hostname,(MDNS.hostname(i).length()+1));
+        }
       }
     }
   }
