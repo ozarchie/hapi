@@ -25,10 +25,12 @@ from __future__ import print_function
 import sys
 import json
 import datetime
+import time
 from log import Log
 import paho.mqtt.client as mqtt
 import notification
 from alert import Alert
+
 
 class Communicator(object):
     def __init__(self, sm):
@@ -98,31 +100,79 @@ class Communicator(object):
         self.subscribe("ENV/#")
 
     def on_message(self, client, userdata, msg):
-        print(msg.topic, msg.payload)
+        print(msg.topic)  # jma-debug
+        print(msg.payload)  # jma-debug
+        Log.info(msg.topic)
         if "ENV/QUERY" in msg.topic:
             self.smart_module.get_env()
 
         elif "ASSET/QUERY" in msg.topic:
+            if  msg.topic.split("/") == 1:  # Generic status enquiry
+                asset_value = self.smart_module.get_asset_data()
+                json_asset = (
+                    str(asset_value).replace("u'", "'").replace("'", "\"")
+                    )
+            else:  # Specific enquiry - determine target(s)
+                asset_value = self.smart_module.get_asset_data()
+                json_asset = (
+                    str(asset_value).replace("u'", "'").replace("'", "\"")
+                    )
             asset_value = self.smart_module.get_asset_data()
-            json_asset = str(self.smart_module.asset).replace("u'", "'").replace("'", "\"")
-            self.send("ASSET/RESPONSE/" + self.smart_module.asset.id, json_asset)
-
+            asset_unit = self.smart_module.get_asset_unit()
+            json_data = (
+                    {
+                    "time": str(time.time()),
+                    "value": str(asset_value).replace("u'", "'").replace("'", "\""),
+                    "unit": str(asset_unit).replace("u'", "'").replace("'", "\"")
+                    }
+                    )
+            json_asset = json.dumps(json_data)
+            self.send(
+                "ASSET/RESPONSE/"
+                + self.smart_module.id + "/"
+                + self.smart_module.asset.context + "/"
+                + self.smart_module.asset.type + "/"
+                + self.smart_module.asset.id,
+                json_asset
+                )
         elif "ASSET/RESPONSE" in msg.topic:
-            asset_id = msg.topic.split("/")[2]
+            asset_id = (
+                          msg.topic.split("/")[2] + "-"  # ID
+                        + msg.topic.split("/")[3] + "-"  # Context
+                        + msg.topic.split("/")[4] + "-"  # Type
+                        + msg.topic.split("/")[5]        # ID (/Name)
+                        )
             asset_info = json.loads(msg.payload)
-            self.smart_module.push_data(asset_info["name"], asset_info["context"],
-                asset_info["value"], asset_info["unit"])
+            Log.info("AssetId = " + asset_id)
+            self.smart_module.push_data(
+                                        asset_id,  # assetID
+                                        msg.topic.split("/")[3],  # Context
+                                        asset_info["time"],
+                                        asset_info["value"],
+                                        asset_info["unit"]
+                                        )
             alert = Alert()
             alert.update_alert(asset_id)
             if alert.check_alert(asset_info["value"]):
                 json_alert = str(alert).replace("u'", "'").replace("'", "\"")
-                self.send("ALERT/" + asset_id, json_alert)
-
+                self.send(
+                        "ALERT/"
+                        + msg.topic.split("/")[2] + "/"  # ID
+                        + msg.topic.split("/")[3] + "/"  # Context
+                        + msg.topic.split("/")[4] + "/"  # Type
+                        + msg.topic.split("/")[5],       # Name
+                        json_alert
+                        )
         elif "STATUS/QUERY" in msg.topic:
-            self.smart_module.last_status = self.smart_module.get_status()
-            json_payload = str(self.smart_module.last_status).replace("'", "\"")
-            self.send("STATUS/RESPONSE/" + self.smart_module.hostname, json_payload)
-
+            if  msg.topic.split("/") == 1:  # Generic status enquiry
+                self.smart_module.last_status = self.smart_module.get_status()
+                json_payload = str(self.smart_module.last_status).replace("'", "\"")
+                self.send(
+                    "STATUS/RESPONSE/"
+                    + self.smart_module.hostname
+                    + "/System/",
+                    json_payload
+                    )
         elif "STATUS/RESPONSE" in msg.topic:
             status_payload = json.loads(msg.payload.replace("'", "\""))
             self.smart_module.push_sysinfo("system", status_payload)
@@ -157,14 +207,14 @@ class Communicator(object):
             asset_id = msg.topic.split("/")[1]
             site_name = self.smart_module.name
             time_now = datetime.datetime.now()
-            value = asset_payload["value"]
+            value_now = asset_payload["value"]
             try:
                 if "email" in asset_payload["response"]:
                     notify = notification.Email()
                     notify.send(
                         notify.subject.format(site=site_name, asset=asset_id),
                         notify.message.format(
-                            time=time_now, site=site_name, asset=asset_id, value=value)
+                            time=time_now, site=site_name, asset=asset_id, value=value_now)
                     )
                 if "sms" in asset_payload["response"]:
                     notify = notification.SMS()
@@ -172,7 +222,7 @@ class Communicator(object):
                         "from",
                         "to",
                         notify.message.format(
-                            time=time_now, site=site_name, asset=asset_id, value=value)
+                            time=time_now, site=site_name, asset=asset_id, value=value_now)
                     )
             except Exception as excpt:
                 Log.exception("Trying to send notification: %s.", excpt)

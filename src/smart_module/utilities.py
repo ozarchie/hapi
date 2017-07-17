@@ -30,6 +30,7 @@ SECONDS_PER_MINUTE = 60
 MINUTES_PER_HOUR = 60
 LOGGING_FILE = "smartmodule.log"
 
+
 def trim(docstring):
     """Trim docstring."""
     # Not sure...

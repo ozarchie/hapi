@@ -23,6 +23,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 import importlib
 import random
 import asset_wt
+from log import Log
+
 
 class AssetInterface(object):
     def __init__(self, asset_type, mock):
@@ -31,10 +33,15 @@ class AssetInterface(object):
         if asset_type.lower() == "mock":
             self.mock = True
         else:
+            Log.info("Importing modules for assets .. asset_" + str(asset_type))
             self.asset_lib = importlib.import_module("asset_" + str(asset_type))
 
     def read_value(self):
         if self.mock:
             return float(random.randrange(8, 34, 1))
-
         return asset_wt.AssetImpl().read_value()
+
+    def read_unit(self):
+        if self.mock:
+            return "C"
+        return "C"

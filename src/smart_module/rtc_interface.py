@@ -27,15 +27,22 @@ import time
 from log import Log
 
 some_import_failed = False
-try:
-    import SDL_DS3231
-except ImportError:
-    some_import_failed = True
+SDL_import = True
+GPIO_import = True
+
 
 try:
     import RPi.GPIO as GPIO
 except ImportError:
+    GPIO_import = False
     some_import_failed = True
+
+try:
+    import SDL_DS3231
+except ImportError:
+    SDL_import = False
+    some_import_failed = True
+
 
 TYPE_ADDRESS = 0
 TYPE_LEN = 2
@@ -46,17 +53,26 @@ CONTEXT_LEN = 16
 
 RTC_VCC_GPIO_PIN = 15
 
+
 class RTCInterface(object):
-    '''Interface for DS3231 Real-time Clock with internal temp sensor and AT24C32 EEPROM
+    '''Interface for
+    DS3231 Real-time Clock with internal temp sensor and
+    AT24C32 EEPROM for storage of asset configuration
     In order to minimize energy consumption, the RTC is kept powered off until it is needed.
     Powering the unit on and off is the responsiblility of the calling code.
     The RTC is powered from a digital pin that is toggled via GPIO output commands.
     '''
 
     def __init__(self):
+        Log.info("Starting RTC interface")
         self.mock = some_import_failed
 
         if self.mock:
+            Log.info("Module loading failed")
+            if (GPIO_import is False):
+                Log.info("GPIO module failed")
+            if (SDL_import is False):
+                Log.info("SDL module failed")
             return
 
         GPIO.setwarnings(False)
@@ -64,6 +80,7 @@ class RTCInterface(object):
         GPIO.setup(RTC_VCC_GPIO_PIN, GPIO.OUT)
         try:
             self.ds3231 = SDL_DS3231.SDL_DS3231(1, 0x68, 0x57)
+            Log.info("Found DS3231")
         except Exception as excpt:
             Log.exception("Error initializing RTC. %s.", excpt)
 
@@ -142,6 +159,12 @@ class RTCInterface(object):
             Log.exception("Error reading %s from EEPROM. %s.", name, excpt)
 
         s = ''.join(chr(c) for c in bytes_)
+        if (address == TYPE_ADDRESS):
+            s = "wt"  # jma
+        if (address == ID_ADDRESS):
+            s = "AirTemp001"  # jma
+        if (address == CONTEXT_ADDRESS):
+            s = "Environment"  # jma
         return s.strip()
 
     def write_eeprom(self, s, address, n, name):

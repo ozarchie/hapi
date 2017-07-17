@@ -26,6 +26,7 @@ import sqlite3
 from log import Log
 from utilities import DB_CORE
 
+
 class Alert(object):
     """Hold Alert information fetched from database and check for alerts."""
 
@@ -51,6 +52,7 @@ class Alert(object):
 
     def update_alert(self, asset_id):
         """Fetch alert parameters from database."""
+        Log.info("Checking alert for asset_id : " + asset_id)
         self.alert_id = asset_id
         try:
             Log.info("Fetching alert parameters from database.")
@@ -75,11 +77,11 @@ class Alert(object):
             database.close()
             Log.info("Closing Alert database connection.")
 
-    def check_alert(self, current_value):
+    def check_alert(self, value):
         """Check for alert to a given _value_."""
-        self.value = current_value
-        if self.lower_threshold <= float(self.value) <= self.upper_threshold:
+        self.value = value
+        if self.lower_threshold <= float(value) <= self.upper_threshold:
             return False
 
-        Log.info("[!] ALERT DETECTED. Value: %s.", self.value)
+        Log.info("[!] ALERT DETECTED. Value: %s.", value)
         return True

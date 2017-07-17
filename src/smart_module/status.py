@@ -60,10 +60,10 @@ class SystemStatus(object):
         net_io_counters = psutil.net_io_counters()
         self.network["packet_sent"] = net_io_counters.packets_sent
         self.network["packet_recv"] = net_io_counters.packets_recv
-        disk_usage = psutil.disk_usage('/')
-        self.disk["total"] = int(disk_usage.total/1024)
-        self.disk["used"] = int(disk_usage.used/1024)
-        self.disk["free"] = int(disk_usage.free/1024)
+#        disk_usage = psutil.disk_usage('/')
+#        self.disk["total"] = disk_usage.total
+#        self.disk["used"] = disk_usage.used
+#        self.disk["free"] = disk_usage.free
         self.timestamp = time.time()
 
 if __name__ == "__main__":

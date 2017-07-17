@@ -45,10 +45,11 @@ from zeroconf import ServiceBrowser, ServiceStateChange, Zeroconf
 
 reload(sys)
 
+
 class Asset(object):
     """Hold Asset (sensor) information."""
-    def __init__(self, host):
-        self.id = ""
+    def __init__(self):
+        self.id = socket.gethostname()
         self.name = ""
         self.unit = ""
         self.virtual = 0
@@ -57,15 +58,20 @@ class Asset(object):
         self.enabled = False
         self.type = ""
         self.value = None
-        self.time = ""
-        self.module = host
 
     def __str__(self):
         """Return Asset information in (almost) JSON."""
-        return str({"id": self.id, "name": self.name, "unit": self.unit, "virtual": self.virtual,
-                    "context": self.context, "system": self.system, "enabled": self.enabled,
-                    "type": self.type, "value": self.value, "time": self.time,
-                    "module": self.module})
+        return str({
+            "id": self.id,
+            "name": self.name,
+            "unit": self.unit,
+            "virtual": self.virtual,
+            "context": self.context,
+            "system": self.system,
+            "enabled": self.enabled,
+            "type": self.type,
+            "value": self.value
+            })
 
     def load_asset_info(self):
         """Load asset information based on database."""
@@ -73,16 +79,20 @@ class Asset(object):
             name
             unit
             virtual
+            context
             system
             enabled
         '''.split()
-        sql = "SELECT {fields} FROM assets WHERE id = '{asset}' LIMIT 1;".format(
-            fields=', '.join(field_names), asset=str(self.id))
+        sql = (
+            "SELECT {fields} FROM assets WHERE id = '{asset}' LIMIT 1;".
+            format(fields=', '.join(field_names), asset=str(self.id))
+            )
         database = sqlite3.connect(utilities.DB_CORE)
         db_elements = database.cursor().execute(sql).fetchone()
         for field_name, field_value in zip(field_names, db_elements):
             setattr(self, field_name, field_value)
         database.close()
+
 
 class SmartModule(object):
     """Represents a HAPI Smart Module (Implementation).
@@ -101,7 +111,7 @@ class SmartModule(object):
         self.mock = True
         self.comm = communicator.Communicator(self)
         self.data_sync = DataSync()
-        self.id = ""
+        self.id = socket.gethostname()
         self.name = ""
         self.wunder_key = ""
         self.operator = ""
@@ -111,13 +121,13 @@ class SmartModule(object):
         self.longitude = ""
         self.latitude = ""
         self.scheduler = None
-        self.hostname = socket.gethostname()
+        self.hostname = ""
         self.last_status = ""
         self.ifconn = None
         self.rtc = rtc_interface.RTCInterface()
         self.rtc.power_on_rtc()
         self.launch_time = self.rtc.get_datetime()
-        self.asset = Asset(self.hostname)
+        self.asset = Asset()
         self.asset.id = self.rtc.get_id()
         self.asset.context = self.rtc.get_context()
         self.asset.type = self.rtc.get_type()
@@ -152,7 +162,7 @@ class SmartModule(object):
     def become_broker(self):
         """If no broker found SM performs operation(s) to become the broker."""
         try:
-            os.system("sudo systemctl start avahi-daemon.service") # We will change it soon!
+            os.system("sudo systemctl start avahi-daemon.service")  # We will change it soon!
         except Exception as excpt:
             Log.info("Error trying to become the Broker: %s.", excpt)
 
@@ -177,27 +187,34 @@ class SmartModule(object):
         browser = ServiceBrowser(zeroconf, "_mqtt._tcp.local.", handlers=[self.find_service])
 
     def discover(self):
-        print("{status} Smart Module hosting asset {asset_id} {asset_type} {asset_context}.".format(
+        Log.info("Starting discovery ... ")
+        print(
+            "{status} Smart Module "
+            "Hostname: {host_id}, "
+            "hosting Asset: {asset_id}, Type: {asset_type}, Context: {asset_context}."
+            .format(
             status="Mock" if self.rtc.mock else "Real",
+            host_id=self.id,
             asset_id=self.asset.id,
             asset_type=self.asset.type,
-            asset_context=self.asset.context))
+            asset_context=self.asset.context)
+            )
 
         try:
-            max_sleep_time = 3 # Calling sleep should be reviewed.
+            max_sleep_time = 3  # Calling sleep should be reviewed.
             zeroconf = Zeroconf()
             Log.info("Performing Broker discovery...")
             self.find_broker(zeroconf)
-            time.sleep(max_sleep_time) # Wait for max_sleep_time to see if we found it.
-            if self.comm.broker_name or self.comm.broker_ip: # Found it.
+            time.sleep(max_sleep_time)  # Wait for max_sleep_time to see if we found it.
+            if self.comm.broker_name or self.comm.broker_ip:  # Found it.
                 Log.info("MQTT Broker: {broker_name} IP: {broker_ip}.".format(
                     broker_name=self.comm.broker_name,
                     broker_ip=self.comm.broker_ip))
-            else: # Make necessary actions to become the broker.
+            else:  # Make necessary actions to become the broker.
                 Log.info("Broker not found. Becoming the broker.")
                 self.become_broker()
             time.sleep(max_sleep_time)
-            self.comm.connect() # Now it's time to connect to the broker.
+            self.comm.connect()  # Now it's time to connect to the broker.
         except Exception as excpt:
             Log.exception("[Exiting] Trying to find or become the broker.")
         finally:
@@ -210,16 +227,16 @@ class SmartModule(object):
 
         self.comm.subscribe("SCHEDULER/RESPONSE")
         self.comm.send("SCHEDULER/QUERY", "Where are you?")
-        Log.info("Waiting for Scheduler response...")
-        time.sleep(5) # Just wait for reply... Need a review?
+        time.sleep(2)  # Just wait for reply... Need a review?
 
+        self.hostname = socket.gethostname()
         self.comm.send("ANNOUNCE", self.hostname + " is online.")
 
         t_end = time.time() + 2
         while (time.time() < t_end) and not self.comm.is_connected:
             time.sleep(1)
 
-        if not self.comm.scheduler_found: # Become the Scheduler (necessary actions as Scheduler)
+        if not self.comm.scheduler_found:  # Become the Scheduler (necessary actions as Scheduler)
             try:
                 Log.info("No Scheduler found. Becoming the Scheduler.")
                 self.scheduler = Scheduler()
@@ -289,7 +306,7 @@ class SmartModule(object):
                     }}]
         meminfo = [{"measurement": "memory", "tags": {"asset": self.name}, "time": timestamp,
                     "fields": {
-                        "unit": "KBytes",
+                        "unit": "bytes",
                         "free": information["memory"]["free"],
                         "used": information["memory"]["used"],
                         "cached": information["memory"]["cached"]
@@ -338,13 +355,19 @@ class SmartModule(object):
 
     def get_asset_data(self):
         try:
-            self.asset.time = str(time.time())
             self.asset.value = str(self.ai.read_value())
         except Exception as excpt:
             Log.exception("Error getting asset data: %s.", excpt)
             self.asset.value = -1000
-
         return self.asset.value
+
+    def get_asset_unit(self):
+        try:
+            self.asset.unit = str(self.ai.read_unit())
+        except Exception as excpt:
+            Log.exception("Error getting asset unit: %s.", excpt)
+            self.asset.unit = -1000
+        return self.asset.unit
 
     def log_sensor_data(self, data, virtual):
         if not virtual:
@@ -368,7 +391,7 @@ class SmartModule(object):
             except Exception as excpt:
                 Log.exception("Error logging sensor data: %s.", excpt)
 
-    def push_data(self, asset_name, asset_context, value, unit):
+    def push_data(self, asset_name, asset_context, time, value, unit):
         try:
             conn = self.connect_influx(asset_context)
             json_body = [
@@ -378,8 +401,9 @@ class SmartModule(object):
                         "site": self.name,
                         "asset": asset_name
                     },
-                    "time": str(datetime.datetime.now()),
+                    "ltime": str(datetime.datetime.now()),
                     "fields": {
+                        "time": time,
                         "value": value,
                         "unit": unit
                     }
@@ -463,6 +487,7 @@ class SmartModule(object):
         except Exception as excpt:
             Log.exception("Error getting environment data: %s.", excpt)
 
+
 class Scheduler(object):
     def __init__(self):
         self.running = True
@@ -483,7 +508,7 @@ class Scheduler(object):
             self.timeout = 0.0
             self.virtual = False
 
-    def process_sequence(self, seq_jobs, job, job_rtu, seq_result):
+    def process_sequence(self, seq_jobs, job, job_rtu):
         for row in seq_jobs:
             name, command, step_name, timeout = row
             seq_result.put(
@@ -517,8 +542,10 @@ class Scheduler(object):
             virtual
         '''.split()
         try:
-            sql = 'SELECT {fields} FROM schedule;'.format(
-                fields=', '.join(field_names))
+            sql = (
+                'SELECT {fields} FROM schedule;'
+                .format(fields=', '.join(field_names))
+                )
             database = sqlite3.connect(utilities.DB_CORE)
             db_jobs = database.cursor().execute(sql)
             for row in db_jobs:
@@ -547,7 +574,7 @@ class Scheduler(object):
                 continue
 
             interval_name = job.time_unit.lower()
-            if job.interval > 0: # There can't be a job less than 0 (0 minutes? 0 seconds?)
+            if job.interval > 0:  # There can't be a job less than 0 (0 minutes? 0 seconds?)
                 plural_interval_name = interval_name + 's'
                 d = getattr(schedule.every(job.interval), plural_interval_name)
                 d.do(self.run_job, job)
@@ -590,8 +617,9 @@ class Scheduler(object):
                     database = sqlite3.connect(utilities.DB_CORE)
                     seq_jobs = database.cursor().execute(*command)
                     #print('len(seq_jobs) =', len(seq_jobs))
-                    p = Process(target=self.process_sequence, args=(seq_jobs, job, job_rtu,
-                                                                    seq_result,))
+                    p = Process(target=self.process_sequence,
+                            args=(seq_jobs, job, job_rtu)
+                        )
                     p.start()
                     database.close()
                 else:
@@ -613,6 +641,7 @@ class Scheduler(object):
 
             except Exception as excpt:
                 Log.exception("Error running job: %s.", excpt)
+
 
 class DataSync(object):
     @staticmethod
@@ -677,13 +706,14 @@ class DataSync(object):
         except Exception as excpt:
             Log.exception("Error synchronizing database: %s.", excpt)
 
+
 def main():
     try:
         smart_module = SmartModule()
-        smart_module.asset.load_asset_info()
-        smart_module.load_site_data()
         smart_module.discover()
         smart_module.load_influx_settings()
+        smart_module.asset.load_asset_info()
+        smart_module.load_site_data()
     except Exception as excpt:
         Log.exception("Error initializing Smart Module. %s.", excpt)
 

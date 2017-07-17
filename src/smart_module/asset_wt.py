@@ -42,6 +42,7 @@ class AssetImpl(object):
 
     def read_temp_raw(self):
         try:
+            Log.info("Reading raw 1-Wire temperature data: %s.", self.device_path)
             with open(self.device_path, "r") as f:
                 return f.read().decode('utf-8').split('\n')
         except Exception as excpt:
@@ -57,7 +58,7 @@ class AssetImpl(object):
 
             equals_pos = lines[1].find('t=')
             if equals_pos != -1:
-                temp_string = lines[1][equals_pos+2:]
+                temp_string = lines[1][equals_pos + 2:]
                 temp_c = float(temp_string) / 1000.0
 
         except Exception as excpt:
