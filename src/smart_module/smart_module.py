@@ -287,7 +287,7 @@ class SmartModule(object):
 
         databases = self.ifconn.get_list_database()
         for db in databases:
-            if database_name in db.values():
+            if database_name in list(db.values()):
                 break
         else:
             self.ifconn.create_database(database_name)

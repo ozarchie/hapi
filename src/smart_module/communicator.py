@@ -31,7 +31,6 @@ import paho.mqtt.client as mqtt
 import notification
 from alert import Alert
 
-
 class Communicator(object):
     def __init__(self, sm):
         self.rtuid = ""
@@ -44,6 +43,7 @@ class Communicator(object):
         self.client.on_disconnect = self.on_disconnect
         self.smart_module = sm
         self.is_connected = False
+        self.is_selected = False
         self.scheduler_found = False
         self.broker_connections = -1
         Log.info("Communicator initialized")
@@ -73,6 +73,99 @@ class Communicator(object):
     def unsubscribe(self, topic):
         """Unsubscribe to a topic."""
         self.client.unsubscribe(topic)
+
+# TODO check context as match from database
+# -----------------------------------------
+    def check_context(self, context):
+        """Check context to see if required to respond to a topic"""
+        if self.smart_module.asset.context == context:
+            return True
+        else:
+            return False
+
+# TODO check type as match from database
+# --------------------------------------
+    def check_type(self, stype):
+        """Check context to see if required to respond to a topic"""
+        if self.smart_module.asset.type == stype:
+            return True
+        else:
+            return False
+
+# TODO check asset as match from database
+# --------------------------------------
+    def check_asset(self, asset):
+        """Check context to see if required to respond to a topic"""
+        if self.smart_module.asset.id == asset:
+            return True
+        else:
+            return False
+
+    def check_selected(self, topic):
+        """Check if required to respond to a topic"""
+        level = topic.split("/")  # array of topic levels
+        number_levels = len(topic.split("/"))  # number of levels
+
+        # QUERY - Level1 - generic
+        if  number_levels <= 2:  # Generic  query
+            self.is_selected = True
+
+        # QUERY - Level2 - NodeID
+        elif  number_levels == 3:
+            if level[2] == "#":  # Any NodeID
+                self.is_selected = True
+            elif level[2] == self.smart_module.id:
+                self.is_selected = True
+
+        # QUERY - Level3 - NodeID + context
+        elif  number_levels == 4:
+            if (
+                level[2] == self.smart_module.id  # This smart module
+                or level[2] == '+'  # Level expander
+                ):
+                if level[3] == "#":  # Any context
+                    self.is_selected = True
+                elif self.check_context(level[3]) is True:
+                    self.is_selected = True
+
+        # QUERY - Level4 - NodeID + context + type
+        elif  number_levels == 5:
+            if (
+                topic.split("/")[2] == self.smart_module.id  # This smart module
+                 or topic.split("/")[2] == '+'  # Level expander
+                ):
+                if (
+                    self.check_context(level[3]) is True  # context match
+                    or level[3] == '+'  # level expander
+                    ):
+                    if level[4] == "#":  # Any type
+                        self.is_selected = True
+                    elif self.check_type(level[4]) is True:  # type match
+                        self.is_selected = True
+
+        # QUERY - Level5 - NodeID + context + type + assetID
+        elif  number_levels == 6:
+            if (
+                topic.split("/")[2] == self.smart_module.id  # This smart module
+                 or topic.split("/")[2] == '+'  # Level expander
+                ):
+                if (
+                    self.check_context(level[3]) is True  # context match
+                    or level[3] == '+'  # level expander
+                    ):
+                    if (
+                        self.check_type(level[4]) is True  # type match
+                        or level[4] == '+'  # level expander
+                        ):
+                        if level[5] == "#":  # Any Asset
+                            self.is_selected = True
+                        elif self.check_asset(level[5]) is True:  # Asset match
+                            self.is_selected = True
+
+        # default is 'not selected'
+        # -------------------------
+        else:
+            self.is_selected = False  # Set not-selected
 
     def on_disconnect(self, client, userdata, rc):
         self.is_connected = False
@@ -105,36 +198,27 @@ class Communicator(object):
         Log.info(msg.topic)
         if "ENV/QUERY" in msg.topic:
             self.smart_module.get_env()
-
         elif "ASSET/QUERY" in msg.topic:
-            if  msg.topic.split("/") == 1:  # Generic status enquiry
+            self.check_selected(msg.topic)
+            if self.is_selected is True:  # Only send response if valid topic for the module
                 asset_value = self.smart_module.get_asset_data()
-                json_asset = (
-                    str(asset_value).replace("u'", "'").replace("'", "\"")
+                asset_unit = self.smart_module.get_asset_unit()
+                json_data = (
+                        {
+                        "time": str(time.time()),
+                        "value": str(asset_value).replace("u'", "'").replace("'", "\""),
+                        "unit": str(asset_unit).replace("u'", "'").replace("'", "\"")
+                        }
+                        )
+                json_asset = json.dumps(json_data)
+                self.send(
+                    "ASSET/RESPONSE/"
+                    + self.smart_module.id + "/"
+                    + self.smart_module.asset.context + "/"
+                    + self.smart_module.asset.type + "/"
+                    + self.smart_module.asset.id,
+                    json_asset
                     )
-            else:  # Specific enquiry - determine target(s)
-                asset_value = self.smart_module.get_asset_data()
-                json_asset = (
-                    str(asset_value).replace("u'", "'").replace("'", "\"")
-                    )
-            asset_value = self.smart_module.get_asset_data()
-            asset_unit = self.smart_module.get_asset_unit()
-            json_data = (
-                    {
-                    "time": str(time.time()),
-                    "value": str(asset_value).replace("u'", "'").replace("'", "\""),
-                    "unit": str(asset_unit).replace("u'", "'").replace("'", "\"")
-                    }
-                    )
-            json_asset = json.dumps(json_data)
-            self.send(
-                "ASSET/RESPONSE/"
-                + self.smart_module.id + "/"
-                + self.smart_module.asset.context + "/"
-                + self.smart_module.asset.type + "/"
-                + self.smart_module.asset.id,
-                json_asset
-                )
         elif "ASSET/RESPONSE" in msg.topic:
             asset_id = (
                           msg.topic.split("/")[2] + "-"  # ID
@@ -164,7 +248,8 @@ class Communicator(object):
                         json_alert
                         )
         elif "STATUS/QUERY" in msg.topic:
-            if  msg.topic.split("/") == 1:  # Generic status enquiry
+            self.check_selected(msg.topic)
+            if self.is_selected is True:  # Only send response if valid topic for the module
                 self.smart_module.last_status = self.smart_module.get_status()
                 json_payload = str(self.smart_module.last_status).replace("'", "\"")
                 self.send(
@@ -175,6 +260,7 @@ class Communicator(object):
                     )
         elif "STATUS/RESPONSE" in msg.topic:
             status_payload = json.loads(msg.payload.replace("'", "\""))
+            print(status_payload)  # jma debug
             self.smart_module.push_sysinfo("system", status_payload)
 
         elif "SCHEDULER/RESPONSE" in msg.topic:
@@ -182,23 +268,33 @@ class Communicator(object):
             Log.info(msg.payload + " has identified itself as the Scheduler.")
 
         elif "SCHEDULER/QUERY" in msg.topic:
-            if self.smart_module.scheduler:
-                self.send("SCHEDULER/RESPONSE", self.smart_module.hostname)
-                Log.info("Sent SCHEDULER/RESPONSE")
+            self.check_selected(msg.topic)
+            if self.is_selected is True:  # Only send response if valid topic for the module
+                if self.smart_module.scheduler:
+                    self.send("SCHEDULER/RESPONSE", self.smart_module.hostname)
+                    Log.info("Sent SCHEDULER/RESPONSE")
 
         elif "SYNCHRONIZE/VERSION" in msg.topic:
-            self.send("SYNCHRONIZE/RESPONSE", self.smart_module.data_sync.read_db_version())
+            self.check_selected(msg.topic)
+            if self.is_selected is True:  # Only send response if valid topic for the module
+                self.send("SYNCHRONIZE/RESPONSE", self.smart_module.data_sync.read_db_version())
 
         elif "SYNCHRONIZE/GET" in msg.topic:
-            if msg.payload == self.smart_module.hostname:
-                self.smart_module.data_sync.publish_core_db(self)
+            self.check_selected(msg.topic)
+            if self.is_selected is True:  # Only send response if valid topic for the module
+                if msg.payload == self.smart_module.hostname:
+                    self.smart_module.data_sync.publish_core_db(self)
 
         elif "SYNCHRONIZE/DATA" in msg.topic:
-            self.smart_module.data_sync.synchronize_core_db(msg.payload)
+            self.check_selected(msg.topic)
+            if self.is_selected is True:  # Only send response if valid topic for the module
+                self.smart_module.data_sync.synchronize_core_db(msg.payload)
 
         elif "$SYS/broker/clients/total" in msg.topic:
-            if self.smart_module.scheduler:
-                self.broker_connections = int(msg.payload)
+            self.check_selected(msg.topic)
+            if self.is_selected is True:  # Only send response if valid topic for the module
+                if self.smart_module.scheduler:
+                    self.broker_connections = int(msg.payload)
 
         elif "ALERT" in msg.topic:
             asset_payload = json.loads(msg.payload)
